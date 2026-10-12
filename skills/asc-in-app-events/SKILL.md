@@ -1,199 +1,155 @@
 ---
 name: asc-in-app-events
-description: Create, localize, illustrate, and submit App Store in-app events with asc app-events, and avoid the review and media pitfalls that the API does not report up front. Use when the user wants to publish an in-app event, upload event card or details page art, localize an event, or work out why an event cannot be submitted.
+description: Create and localize App Store in-app events, upload event media, and submit or recover event review submissions with asc. Use when managing in-app events, event card or details page assets, or event-specific submission errors.
 ---
 
 # asc in-app events
 
-Use this skill to take an in-app event from nothing to "Waiting for Review" with
-`asc app-events`, and to check the things App Store Connect only complains about
-at submission time.
+Use `asc app-events` for the requested stages only. A localization, media upload,
+or diagnostic request does not authorize creating or submitting another event.
+Preserve the resolved app, event, platform, locales, and existing authorization.
 
-## Preconditions
-- Auth configured (`asc auth login` or `ASC_*` env vars).
-- Know your app ID (`ASC_APP_ID` or `--app`).
-- The live build of the app can open a deep link (custom URL scheme or universal
-  link). See "Deep link" below; without one the event cannot be reviewed.
+## Inspect the target
 
-## Workflow
+Check `asc app-events --help` and the relevant subcommand help before execution.
+Resolve the app ID and auth profile; inspect an existing event before changing it:
 
-1. Preflight the deep link and the art (sections below).
-2. Create the event.
-3. Add one localization per locale you support.
-4. Upload media to the primary locale.
-5. Verify, then submit.
+```bash
+asc app-events list --app "APP_ID" --paginate --output json
+asc app-events view --event-id "EVENT_ID" --output json
+asc app-events localizations list --event-id "EVENT_ID" --paginate --output json
+```
 
-### 1. Create the event
+Use explicit `--output json` when parsing results; output defaults are TTY-aware.
+Keep event IDs and localization IDs distinct.
+
+## Prepare and create
+
+- Choose the event badge and intended territories. Check help for accepted
+  `--event-type`, `--purpose`, and `--purchase-requirement` values; do not infer
+  that every value described in App Store Connect is supported by the CLI.
+- Set future RFC 3339 dates: start before end, duration from 15 minutes to 31 days,
+  and publish start no more than 14 days before the event and no later than start.
+  The CLI parses timestamps but does not enforce all of Apple's schedule rules.
+- Provide a deep link that opens the event's destination. Test the universal link
+  or custom URL scheme in the intended app build; a registered scheme alone does
+  not prove the destination works. Creation without a deep link can succeed even
+  though the event is not ready for review.
+
+Replace the date variables with the agreed schedule before creating:
 
 ```bash
 asc app-events create \
-  --app "APP_ID" \
-  --name "Summer Challenge" \
-  --event-type CHALLENGE \
-  --start "2026-06-01T00:00:00Z" \
-  --end "2026-06-30T23:59:59Z" \
-  --publish-start "2026-05-25T00:00:00Z" \
-  --deep-link "myapp://event/summer" \
+  --app "APP_ID" --name "Summer Challenge" --event-type CHALLENGE \
+  --start "$START_RFC3339" --end "$END_RFC3339" \
+  --publish-start "$PUBLISH_START_RFC3339" \
+  --deep-link "myapp://event/summer" --primary-locale en-US \
   --purchase-requirement NO_COST_ASSOCIATED \
-  --primary-locale en-US \
-  --priority NORMAL \
-  --purpose APPROPRIATE_FOR_ALL_USERS \
-  --output json
+  --priority NORMAL --purpose APPROPRIATE_FOR_ALL_USERS --output json
 ```
 
-- `--name` is the reference name. It is not shown on the App Store.
-- `--event-type` is the badge: `LIVE_EVENT`, `PREMIERE`, `CHALLENGE`,
-  `COMPETITION`, `NEW_SEASON`, `MAJOR_UPDATE`, `SPECIAL_EVENT`.
-- `--purpose`: `APPROPRIATE_FOR_ALL_USERS`, `ATTRACT_NEW_USERS`,
-  `KEEP_ACTIVE_USERS_INFORMED`, `BRING_BACK_LAPSED_USERS`.
-- `--priority`: `HIGH` or `NORMAL`.
-- Run `asc app-events create --help` for the purchase requirement values the
-  installed CLI accepts.
+`--name` is the internal reference name, limited to 64 characters. Retain the
+returned event ID. For an existing event, use `asc app-events update` instead of
+creating a replacement; check its help for the fields being changed.
 
-Keep the returned event ID.
+## Localize and upload media
 
-### 2. Localize
+Create only missing, requested localizations. Displayed names allow 30 characters,
+short descriptions 50, and long descriptions 120. Use
+`asc app-events localizations update --localization-id "LOC_ID"` for an existing
+localization, supplying the text flags that need changing.
 
 ```bash
 asc app-events localizations create \
-  --event-id "EVENT_ID" \
-  --locale "en-US" \
-  --name "Summer Challenge" \
+  --event-id "EVENT_ID" --locale en-US --name "Summer Challenge" \
   --short-description "Win three duels a day." \
-  --long-description "Play every day in June to earn the summer badge."
+  --long-description "Play every day during the challenge to earn the summer badge."
 
-asc app-events localizations list --event-id "EVENT_ID" --output table
-```
-
-Update an existing one with
-`asc app-events localizations update --localization-id "LOC_ID" ...`.
-
-### 3. Upload media
-
-Each localization takes an event card and an event details page:
-
-```bash
 asc app-events screenshots create \
-  --event-id "EVENT_ID" --locale "en-US" \
+  --event-id "EVENT_ID" --locale en-US \
   --path "./event-card.png" --asset-type EVENT_CARD
-
 asc app-events screenshots create \
-  --event-id "EVENT_ID" --locale "en-US" \
+  --event-id "EVENT_ID" --locale en-US \
   --path "./event-details.png" --asset-type EVENT_DETAILS_PAGE
 ```
 
-Video works the same way through `asc app-events video-clips create`, with
-`--preview-frame-time-code` for the poster frame.
+Use `--localization-id "LOC_ID"` instead of `--event-id` plus `--locale` when
+the localization is already resolved. Video uploads use
+`asc app-events video-clips create`; inspect its help for asset types and
+`--preview-frame-time-code`.
 
-### 4. Verify and submit
+Use JPG/JPEG/PNG images, at most 500 MB each. Export opaque images without
+alpha channels for upload compatibility. Apple specifies these dimensions:
+
+| Asset | Aspect ratio | Minimum | Maximum |
+| --- | --- | --- | --- |
+| `EVENT_CARD` | 16:9 | 1920 × 1080 | 3840 × 2160 |
+| `EVENT_DETAILS_PAGE` | 9:16 | 1080 × 1920 | 2160 × 3840 |
+
+Avoid embedded text or logos where possible. Account for crops, gradients, and
+App Store controls; inspect the App Store Connect preview when available rather
+than assuming a fixed percentage of the image is safe. Verify media for each
+intended localization; do not assume a locale with translated text inherits
+missing assets from the primary locale. See Apple's [media specifications](https://developer.apple.com/help/app-store-connect/reference/in-app-events/in-app-event-media-and-audio-specifications/)
+and [presentation guidance](https://developer.apple.com/app-store/in-app-events/).
+
+## Verify and submit
+
+Read back the schedule, deep link, localized text, and delivered media. Inspect
+video clips too when used. Report any preview or link behavior not verified.
 
 ```bash
 asc app-events view --event-id "EVENT_ID" --output json
-asc app-events screenshots list --event-id "EVENT_ID" --locale "en-US" --output table
-asc app-events submit --event-id "EVENT_ID" --app "APP_ID" --confirm
+asc app-events screenshots list --event-id "EVENT_ID" --locale en-US --paginate --output json
 ```
 
-Do not run `submit` until the user has seen the art in the App Store Connect
-preview (see "Media safe area").
-
-## Pitfalls
-
-These are field observations from shipping events, not documented API rules.
-Treat them as checks to run, and re-verify when behaviour looks different.
-
-### Deep link: creating works, review does not
-
-`asc app-events create` succeeds without `--deep-link`, so the gap stays hidden
-until the end. Adding the event to a review submission then fails with:
-
-```
-409 ENTITY_ERROR.ATTRIBUTE.REQUIRED  deepLink
-```
-
-With `asc app-events submit` it surfaces as
-`app-events submit: failed to add event to submission`. The review submission
-created a moment earlier can be left behind empty: inspect it with
-`asc review submissions-get --id "SUBMISSION_ID"` and cancel it with
-`asc submit cancel --id "SUBMISSION_ID" --confirm` before trying again.
-
-Before creating the event:
-
-- Confirm the app registers a URL scheme (`CFBundleURLTypes` in `Info.plist`) or
-  an associated domain for universal links.
-- Confirm the build that is live on the App Store handles that link. If the app
-  has no scheme at all, a new build has to ship first; the event cannot be
-  reviewed before it.
-
-If the event already exists, fix it in place:
+For an app with an approved iOS version, when submission is authorized and no
+existing submission needs to be continued:
 
 ```bash
-asc app-events update --event-id "EVENT_ID" --deep-link "myapp://event/summer"
+asc app-events submit --event-id "EVENT_ID" --app "APP_ID" --platform IOS --confirm --output json
+asc review submissions-get --id "SUBMISSION_ID" --output json
 ```
 
-### Media safe area: keep the story in the top half
+Use the `submissionId` from the receipt for the second command. Report the state
+returned by Apple; a successful submit receipt is not evidence of approval or
+publication. If the app has no approved iOS version, Apple requires the event in
+the first version's submission. Use `asc-release-flow` to prepare that version,
+then add the event to its intended draft with `review items-add` as shown below;
+skip the standalone `app-events submit` command. Coordinate the build and event
+release when new functionality is needed. See Apple's [submission guidance](https://developer.apple.com/help/app-store-connect/manage-submissions-to-app-review/submit-an-in-app-event).
 
-The App Store draws the badge, the event name and the short description over
-the lower part of the art, on a blur that starts at roughly 55% of the height.
-That applies to both assets:
+## Recover without duplicating work
 
-| Asset | Size | Covered by the store |
-|---|---|---|
-| `EVENT_CARD` | 1920 x 1080 | lower ~45% (badge, name, short description) |
-| `EVENT_DETAILS_PAGE` | 1080 x 1920 | lower ~45%, plus the app icon top-left and the close button top-right |
+`app-events submit` creates a new review submission, adds the event, then submits
+it. A failure after creation can leave a draft behind, even when no submission ID
+appears in the error. Inspect submissions and their items before retrying:
 
-Rules for the art:
-
-- Put everything that tells the story in the top ~52% of the frame.
-- Leave the top-left and top-right corners of the details page empty.
-- Avoid text in the art, above all the event name or the app name: the store
-  prints both next to it already.
-- Check the result in the App Store Connect preview before submitting. A layout
-  that looks balanced as a flat image often loses its subject under the blur.
-
-### Media per locale: upload once, to the primary locale
-
-When the art carries no text, upload it to the primary locale only. The other
-localizations fall back to it.
-
-Uploading a copy to every locale multiplies the calls (two assets times every
-locale, per event) and has triggered bursts of:
-
-```
-403 FORBIDDEN_ERROR  The API key in use does not allow this request
+```bash
+asc review submissions-list --app "APP_ID" --platform IOS --paginate --output json
+asc review submissions-get --id "SUBMISSION_ID" --output json
+asc review items-list --submission "SUBMISSION_ID" --paginate --output json
 ```
 
-on event screenshots and event localizations, for reads as well as writes,
-while the hourly quota was far from used up. The key is fine and the role is
-fine: the error clears by itself within minutes.
+For an intended `READY_FOR_REVIEW` draft, confirm the app, platform, and all items
+belong to the authorized submission. Repair the event first. For example, use
+`asc app-events update --event-id "EVENT_ID" --deep-link "myapp://event/summer"`
+when Apple reports a missing deep link. Then reuse the draft:
 
-- Do not rotate the key or change its role in response to this error.
-- Retry reads and updates with backoff.
-- Do not blindly retry an upload: list first
-  (`asc app-events screenshots list --event-id "EVENT_ID" --locale "en-US"`) so a
-  retried `create` does not leave a duplicate asset.
+```bash
+asc review items-add --submission "SUBMISSION_ID" --item-type appEvents --item-id "EVENT_ID" --if-exists skip
+asc review submissions-submit --id "SUBMISSION_ID" --confirm
+```
 
-Upload per locale only when the art really differs by language.
+Do not cancel an empty `READY_FOR_REVIEW` draft: it has no active review to cancel.
+Do not resubmit a submission already waiting for review. Route other submission
+states to `asc-submission-health`, preserving the target and authorized work.
 
-### Events and a version in the same release
+A `403 FORBIDDEN_ERROR` can indicate real access restrictions. Check the selected
+profile, app access, and role before diagnosing a transient service error; one
+403 is not a reason to rotate credentials or assume they are valid. If recent
+successful calls support a transient diagnosis, retry reads with bounded backoff
+and stop if the error persists. Before repeating an uncertain create or upload,
+list the existing resource and inspect its delivery state to avoid duplicates.
 
-An event submitted with `asc app-events submit` goes into its own review
-submission. If the event depends on something in a new build (the deep link
-handler, or the feature the event advertises), make sure that build is approved
-and live before the event's `--publish-start`, or the event will point at an
-app that cannot open it.
-
-## Checklist before submit
-
-- [ ] `deepLink` is set, and the live build opens it.
-- [ ] Start, end and publish start are RFC 3339, and publish start is not after start.
-- [ ] Every supported locale has a name and a short description.
-- [ ] `EVENT_CARD` and `EVENT_DETAILS_PAGE` exist on the primary locale.
-- [ ] The subject of the art sits in the top ~52%; details page corners are empty.
-- [ ] The user has looked at the App Store Connect preview.
-
-## Notes
-
-- Default output is JSON; use `--output table` for a quick human check.
-- Deleting needs `--confirm`: `asc app-events delete --event-id "EVENT_ID" --confirm`.
-- Always check `asc app-events --help` and the subcommand `--help` for the flags
-  of the installed CLI version.
+For current provider requirements, consult Apple's [event setup guidance](https://developer.apple.com/help/app-store-connect/offer-in-app-events/offer-in-app-events/).

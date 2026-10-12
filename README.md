@@ -412,18 +412,18 @@ Show me the latest TestFlight crashes and feedback for MyApp, grouped by signatu
 
 ### asc-in-app-events
 
-Create, localize, illustrate, and submit App Store in-app events, with checks for the review and media pitfalls.
+Create and localize App Store in-app events, upload event media, and submit or recover event review submissions.
 
 **Use when:**
 - You want to publish an in-app event from the terminal
 - You need to upload event card and event details page art
 - An event cannot be added to a review submission (missing deep link)
-- You want to know where the App Store covers your event art
+- You need to recover an event submission without creating duplicate drafts
 
 **Example:**
 
 ```bash
-Create a CHALLENGE in-app event for MyApp for June, localize it for en-US and de-DE, upload the card and details art, and submit it for review.
+Prepare a challenge event for MyApp with en-US and de-DE localizations and event artwork, then report what remains before submission.
 ```
 
 ### asc-wall-submit
